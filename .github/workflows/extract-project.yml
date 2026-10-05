@@ -1,0 +1,110 @@
+name: Extract Project ZIP
+
+on:
+  workflow_dispatch:
+    inputs:
+      zip_file:
+        description: "ZIP file to extract (leave empty to use the first .zip found)"
+        required: false
+        type: string
+      destination:
+        description: "Extraction destination"
+        required: false
+        default: "."
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Find ZIP
+        id: find_zip
+        shell: bash
+        run: |
+          set -e
+
+          ZIP_INPUT="${{ inputs.zip_file }}"
+
+          if [ -n "$ZIP_INPUT" ]; then
+            if [ ! -f "$ZIP_INPUT" ]; then
+              echo "::error::ZIP file not found: $ZIP_INPUT"
+              exit 1
+            fi
+            ZIP_FILE="$ZIP_INPUT"
+          else
+            mapfile -t ZIPS < <(find . -type f -name "*.zip" -not -path "./.git/*" | sort)
+
+            if [ "${#ZIPS[@]}" -eq 0 ]; then
+              echo "::error::No ZIP file found in the repository."
+              exit 1
+            fi
+
+            if [ "${#ZIPS[@]}" -gt 1 ]; then
+              echo "Multiple ZIP files found:"
+              printf '%s\\n' "${ZIPS[@]}"
+              echo "::error::More than one ZIP exists. Specify zip_file when running the workflow."
+              exit 1
+            fi
+
+            ZIP_FILE="${ZIPS[0]}"
+          fi
+
+          echo "Using ZIP: $ZIP_FILE"
+          echo "zip_file=$ZIP_FILE" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare extraction directory
+        run: |
+          mkdir -p "${{ inputs.destination || '.' }}"
+
+      - name: Extract ZIP
+        shell: bash
+        run: |
+          set -e
+
+          ZIP_FILE="${{ steps.find_zip.outputs.zip_file }}"
+          DEST="${{ inputs.destination || '.' }}"
+
+          echo "Extracting $ZIP_FILE -> $DEST"
+          unzip -o "$ZIP_FILE" -d "$DEST"
+
+          # Never allow an uploaded project archive to overwrite Git metadata.
+          rm -rf "$DEST/.git"
+
+      - name: Show extracted project
+        run: |
+          echo "Extracted files:"
+          find "${{ inputs.destination || '.' }}" -maxdepth 3 -type f \
+            -not -path "*/.git/*" \
+            | sort \
+            | head -300
+
+      - name: Remove source ZIP
+        run: |
+          rm -f "${{ steps.find_zip.outputs.zip_file }}"
+
+      - name: Commit extracted project
+        shell: bash
+        run: |
+          set -e
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add -A
+
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+            exit 0
+          fi
+
+          git commit -m "chore: extract project archive"
+          git push
