@@ -63,7 +63,31 @@ jobs:
           DEST="${{ inputs.destination || '.' }}"
 
           mkdir -p "$DEST"
-          unzip -o "$ZIP_FILE" -d "$DEST"
+
+          # Extract into a temporary directory first so we can safely
+          # unwrap archives that contain a single top-level folder such as
+          # workspace/ without touching the repository's own .git.
+          TMP_DIR="$RUNNER_TEMP/ryuna-extract"
+          rm -rf "$TMP_DIR"
+          mkdir -p "$TMP_DIR"
+
+          unzip -o "$ZIP_FILE" -d "$TMP_DIR"
+
+          if [ "$DEST" = "." ]; then
+            shopt -s dotglob nullglob
+            ITEMS=("$TMP_DIR"/*)
+
+            if [ "${#ITEMS[@]}" -eq 1 ] && [ -d "${ITEMS[0]}" ]; then
+              echo "Detected single wrapper directory: ${ITEMS[0]}"
+              shopt -s dotglob
+              mv "${ITEMS[0]}"/* "$DEST"/
+            else
+              mv "$TMP_DIR"/* "$DEST"/
+            fi
+          else
+            shopt -s dotglob nullglob
+            mv "$TMP_DIR"/* "$DEST"/
+          fi
 
           # Never delete the repository's own .git directory.
           # Only remove .git directories created inside the extracted archive.
