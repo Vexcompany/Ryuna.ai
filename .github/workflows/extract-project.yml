@@ -65,8 +65,13 @@ jobs:
           mkdir -p "$DEST"
           unzip -o "$ZIP_FILE" -d "$DEST"
 
-          # Prevent an archive from replacing the repository's Git metadata.
-          rm -rf "$DEST/.git"
+          # Never delete the repository's own .git directory.
+          # Only remove .git directories created inside the extracted archive.
+          if [ "$DEST" = "." ]; then
+            find . -mindepth 2 -type d -name .git -prune -exec rm -rf {} +
+          else
+            find "$DEST" -mindepth 1 -type d -name .git -prune -exec rm -rf {} +
+          fi
 
       - name: Remove source ZIP
         run: |
